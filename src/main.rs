@@ -10,21 +10,35 @@ use std::sync::mpsc::channel;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 use std::sync::RwLock;
+use std::sync::mpsc::SendError;
+use std::thread::spawn;
 
-static mut NUM_SENDER: Option<Arc<Sender<u64>>> = Option::None;
-static mut NUM_RECEIVER: Option<Arc<Receiver<u64>>> = Option::None;
+static mut NUM_SENDER: Option<Arc<Sender<usize>>> = Option::None;
+static mut NUM_RECEIVER: Option<Arc<Receiver<usize>>> = Option::None;
 static mut SUM: AtomicUsize = AtomicUsize::new(0);
 
-#[get("/")]
+#[get("/sum")]
 fn index() -> String {
     unsafe {
         SUM.load(Ordering::SeqCst).to_string()
     }
 }
 
+#[get("/sum/<num>")]
+fn sum(num: usize) -> String {
+    unsafe {
+        if let Some(arc) = &NUM_SENDER {
+            arc.send(num).unwrap();
+        };
+    }
+
+    "Received".to_string()
+}
+
 fn main() {
     set_channels();
-    rocket::ignite().mount("/", routes![index]).launch();
+    spawn(|| run_sum_thread());
+    rocket::ignite().mount("/", routes![index, sum]).launch();
 }
 
 fn set_channels() {
@@ -38,12 +52,13 @@ fn set_channels() {
 fn run_sum_thread() {
     loop {
         let num = read_next_num();
+        add_to_sum(num);
     }
 }
 
-fn read_next_num() -> u64 {
+fn read_next_num() -> usize {
     unsafe {
-        match match NUM_RECEIVER {
+        match match &NUM_RECEIVER {
             Some(x) => x,
             None => unimplemented!(),
         }.recv() {
